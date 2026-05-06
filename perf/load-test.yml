@@ -1,0 +1,87 @@
+config:
+  target: "http://localhost:3000"
+  processor: "./processor.js"
+  phases:
+    - duration: 10
+      arrivalRate: 5
+      name: Warm-up
+    - duration: 30
+      arrivalRate: 20
+      rampTo: 50
+      name: Ramp-up load
+    - duration: 20
+      arrivalRate: 50
+      name: Sustained load
+  defaults:
+    headers:
+      Content-Type: "application/json"
+  ensure:
+    thresholds:
+      - http.response_time.p95: 500
+      - http.response_time.p99: 1000
+    conditions:
+      - expression: "http.codes.500 == 0"
+        strict: true
+
+scenarios:
+  - name: "User CRUD chained scenario (output -> input)"
+    weight: 10
+    flow:
+      # Generate unique payload for this VU
+      - function: "generateUserPayload"
+
+      # 1. CREATE user — capture id and email
+      - post:
+          url: "/api/v1/users"
+          json:
+            name: "{{ testName }}"
+            email: "{{ testEmail }}"
+            age: 25
+          capture:
+            - json: "$.data.id"
+              as: "userId"
+            - json: "$.data.email"
+              as: "userEmail"
+          expect:
+            - statusCode: 201
+            - hasProperty: "data.id"
+
+      # 2. READ created user (input: id from step 1)
+      - get:
+          url: "/api/v1/users/{{ userId }}"
+          expect:
+            - statusCode: 200
+
+      # 3. UPDATE user (input: id from step 1)
+      - put:
+          url: "/api/v1/users/{{ userId }}"
+          json:
+            age: 30
+          expect:
+            - statusCode: 200
+
+      # 4. LIST with search by captured email
+      - get:
+          url: "/api/v1/users?search={{ userEmail }}"
+          expect:
+            - statusCode: 200
+
+      # 5. DELETE user (input: id from step 1)
+      - delete:
+          url: "/api/v1/users/{{ userId }}"
+          expect:
+            - statusCode: 204
+
+      # 6. Verify deletion (404 expected)
+      - get:
+          url: "/api/v1/users/{{ userId }}"
+          expect:
+            - statusCode: 404
+
+  - name: "Health probe"
+    weight: 1
+    flow:
+      - get:
+          url: "/api/v1/health"
+          expect:
+            - statusCode: 200

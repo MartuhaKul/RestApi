@@ -106,8 +106,106 @@ curl -X DELETE http://localhost:3000/api/v1/users/<UUID>
 ## Тести
 
 ```bash
-npm test           # одноразово
-npm run test:watch # у watch-режимі
+npm test            # одноразово
+npm run test:watch  # watch-режим
+npm run test:coverage  # з покриттям коду
 ```
 
 Покривають: успішні CRUD-флоу, валідаційні помилки (422), не знайдено (404), конфлікт email (409), пагінацію, пошук, health, неіснуючі маршрути.
+
+---
+
+# Завдання TEST
+
+Цей проєкт також містить три завдання з тестування:
+
+## 1. Code coverage (≥30%)
+
+```bash
+npm run test:coverage
+```
+
+**Інструменти**: Vitest + `@vitest/coverage-v8`. Конфіг у `vitest.config.ts`, поріг 30% по `lines/functions/branches/statements`. Звіт зберігається в `coverage/index.html`.
+
+**Поточні результати**: **89.33% statements / 88.46% branches / 96.15% functions / 89.33% lines** (13 тестів). Результати по файлах:
+
+| Файл | % Lines |
+|------|---------|
+| user.controller.ts | 100% |
+| user.repository.ts | 100% |
+| user.routes.ts | 100% |
+| user.schema.ts | 100% |
+| user.service.ts | 86.79% |
+| validate.ts | 100% |
+| http-error.ts | 93.1% |
+| async-handler.ts | 100% |
+
+## 2. Performance testing — chained scenario
+
+```bash
+# 1) Запустити сервер у одному терміналі
+npm run build && npm start
+
+# 2) У іншому — навантажувальний тест
+npm run perf
+```
+
+**Інструмент**: [Artillery](https://www.artillery.io/). Конфіг у `perf/load-test.yml`, JS-процесор для генерації унікальних даних — `perf/processor.js`.
+
+**Сценарій (output → input ланцюг)**:
+
+1. **POST** `/api/v1/users` — створити користувача → захопити `userId` та `userEmail` з відповіді
+2. **GET** `/api/v1/users/{{ userId }}` — прочитати щойно створеного користувача
+3. **PUT** `/api/v1/users/{{ userId }}` — оновити age=30
+4. **GET** `/api/v1/users?search={{ userEmail }}` — знайти його через пошук
+5. **DELETE** `/api/v1/users/{{ userId }}` — видалити
+6. **GET** `/api/v1/users/{{ userId }}` — підтвердити 404
+
+**Фази навантаження**: warm-up (10s @ 5 req/s) → ramp-up (30s до 50 req/s) → sustained (20s @ 50 req/s).
+
+**Останні результати** (60s):
+- 11,610 запитів, **0 фейлів**
+- 219 req/sec
+- p95: **1ms**, p99: **5ms**, max: 475ms
+- Розподіл статусів: 5904×200, 1902×201, 1902×204, 1902×404 (всі очікувані)
+
+JSON-звіт: `perf/report.json`.
+
+## 3. Web scraping з Selenium
+
+```bash
+npm run scrape
+```
+
+**Інструмент**: `selenium-webdriver` (Chrome у headless режимі). Скрипт у `scraper/scrape.ts`.
+
+**Сценарій**:
+1. Відкрити https://quotes.toscrape.com/login
+2. **Заповнити форму авторизації** (username/password) і сабмітнути
+3. Перевірити, що залогінилися (поява лінку `Logout`)
+4. Переходити по сторінках `/page/N/` (до 5)
+5. Зі сторінки витягати: текст цитати, автора, теги, лінк `(about)` (видимий лише авторизованим користувачам)
+6. Зберегти у `scraper/scraped-data.json`
+
+**Останні результати**:
+- 5 сторінок відвідано
+- **50 цитат** виявлено
+- 28 унікальних авторів
+- 79 унікальних тегів
+- Авторизація успішна (поле `authenticated: true`)
+
+Структура збереженого JSON:
+```json
+{
+  "scrapedAt": "2026-05-06T...",
+  "source": "https://quotes.toscrape.com",
+  "authenticated": true,
+  "pagesVisited": 5,
+  "totalQuotes": 50,
+  "uniqueAuthors": [...],
+  "uniqueTags": [...],
+  "quotes": [{ "text", "author", "tags", "authorAboutHref" }]
+}
+```
+
+**Примітка**: ChromeDriver автоматично завантажується через Selenium Manager (вбудований у `selenium-webdriver` 4.6+) — потрібен лише встановлений Chrome.

@@ -1,6 +1,8 @@
 node_modules
 dist
 coverage
+perf/report.json
+scraper/scraped-data.json
 *.log
 .env
 .DS_Store
